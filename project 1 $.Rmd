@@ -1,0 +1,248 @@
+---
+title: "Project 1: General Analysis Worldwide Suicide rate in 2016"
+author: "Trinh Pham (SDS348)"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+- Suicide is a global phenomenon and occurs throughout the lifespan. Effective and evidence-based intervention can implement population. Suicide is a complex issue and therefore suicide prevention efforts need to collaboration among multiple aspects and other sectors such as society, mental business, justice. These efforts must be comprehensive and become broader over worldwide. 
+- Data from this project carried out to investigate the relationship between the suicide number and the population of each country and by gender. By using the additional data of the facilities, the variable of health unit and mental hospital shown the inversely proportional to the suicide number variable by each country.
+- This project is make an overall analysis of suicide rate and explain these rate in detail by dyplyr and PCA.
+
+# Tidy & Join/Merge
+```{r, include=TRUE, cache = FALSE}
+#imported the dataset
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(readxl)
+library(usethis) 
+use_git_config(user.name = "trinh-pham1094", user.email = "trinh.pham1094@gmail.com")
+Facilities <- read_excel("~/Desktop/Facilities_new.xlsx")
+
+suicide <- read_excel("~/Desktop/suicide_rate.xlsx")
+Facilities
+suicide
+glimpse(suicide)
+glimpse(Facilities)
+#tidy data set by using pipe
+suicide_tidy<- suicide %>% ## join/merge 2 dataset
+   left_join(Facilities,by="country") %>%
+  select(-'country-year',-'HDI_for_year',-'outpatient_facilities',-'residential_facilities' ,-'day_treatment',-'gdp_for_year($)',-'gdp_per_capita($)',-'suicides/100k_pop') %>%
+  filter(year.x=="2016") %>%
+  select(-year.y,-year.x) %>%  
+  arrange(desc(suicides_no)) %>%
+  na.omit()  %>%
+  mutate_if(is.character,as.factor)
+suicide_tidy
+```
+*My main point in this research is focus on the suicide number of population in 2016 and how the facilities such as mental hospital and health unit effects on the number of suicide by each country. Thus, my dataset have been drop 9 variable include country-year','HDI_for_year','outpatient_facilities','residential_facilities' ,'day_treatment','gdp_for_year($)','gdp_per_capita($)','suicides/100k_pop' after combining two dataset.*
+
+##Summary statistic
+```{r }
+#explore the suicide_tidy dataset by dplyr function
+# Summarize data by finding the mean suicide_no, number of rows, and number of distinct (country)
+suicide_tidy %>%
+   summarize(mean(suicides_no, na.rm=T), # calculate mean by ignoring NA values
+            n(), # number of rows
+            n_distinct(country))
+# Summarize data by finding the mean population, number of rows, and number of distinct (country)
+suicide_tidy %>%
+   summarize(mean(population, na.rm=T), # calculate mean by ignoring NA values
+            n(), # number of rows
+            n_distinct(country))
+# Summarize data by finding the mean mental_hospitals, number of rows, and number of distinct (country)
+suicide_tidy %>%
+   summarize(mean(mental_hospitals, na.rm=T), # calculate mean by ignoring NA values
+            n(), # number of rows
+            n_distinct(country))
+# Summarize data by finding the mean mental_hospitals, number of rows, and number of distinct (country)
+suicide_tidy %>%
+   summarize(mean(health_units, na.rm=T), # calculate mean by ignoring NA values
+            n(), # number of rows
+            n_distinct(country))
+
+# Find summaries under certain conditions: find mean suicide_no, mental_hospital and population for female in Thailand
+suicide_tidy %>% 
+  filter(sex=="male", country=="Thailand") %>% 
+  summarize(mean(suicides_no), mean(population),mean(mental_hospitals))
+
+# Find summaries by subgroups: mean suicides_no per country
+suicide_tidy %>%# number of distinct values 
+  group_by(country)%>%
+   summarize(mean_suicides_noNA = mean(suicides_no,na.rm=T)) # ignoring NA values
+
+# Find mean suicides_no, sd and se per country per sex
+suicide_tidy %>% 
+  group_by(country,sex) %>% 
+  summarize(mean_suicides=mean(suicides_no, na.rm=T), 
+            sd_vol=sd(suicides_no, na.rm=T), 
+            n=n(),
+            se_vol=sd_vol/sqrt(n)) # use recently defined variables
+
+# Stop grouping: count how many observations per country then count how many of these observations per country are distinct
+suicide_tidy  %>% 
+  group_by(country) %>% 
+  summarize(count=n()) %>% 
+  ungroup() %>% 
+  summarize(n_distinct(count))
+
+#Describe function include analysis of all the numeric dataset. For this, mean, quantile, min, max, median, 1st quarantile, 3rd qurantile.
+summary(suicide_tidy) 
+```
+*The mean of suicide number per country is 101.
+  The mean of population per country is 1010347
+  The mean of mental_hospital per country is 0.226
+  The mean of  health_unit is 0.966
+  The mean suicide number, mental hospital and population for female in Thailand are 655, 5189063, 0.028.*
+  
+  
+## Plotting
+```{r }
+library(ggplot2) 
+suicide_tidy<-as.data.frame(suicide_tidy)
+# Display the distribution of country and sex of number of suicide. 
+ggplot(suicide_tidy, aes(x=country,fill=sex))+
+   geom_bar(aes(y = suicides_no), stat="summary", fun="mean")
+
+## Considering age values as categories to display the distribution of number of suicide for age.
+ggplot(suicide_tidy, aes(x=suicides_no, y=mental_hospitals,color=country))+
+  geom_point() 
+```
+* Thailand is the country have the highest number of suicide rate in 2016. The male have suicide rate is extremely higher than female.* The lowest is Grenada, which is have 0 number of suicide in 2016.
+  According the geom_point plot, Grenada have the highest number of mental_hospitals in their country and Thailands have the lowest. Therefore, the mental hospitals rate is inversely proportional to the suicides number. *
+
+```{r }
+##Making a heatmap with geom_title
+## Visualize the relationship first
+ggplot(suicide_tidy, aes(x = suicides_no, y = population)) +
+  geom_point()
+# Find the correlation between two variables
+cor(suicide_tidy$suicides_no,suicide_tidy$population, use = "pairwise.complete.obs")
+#Build a correlation matrix between all numeric variables
+suicide_num <- suicide_tidy %>%
+  select_if(is.numeric)
+suicide_num
+cor(suicide_num, use = "pairwise.complete.obs")
+# Make it pretty using a heatmap with geom_tile!
+cor(suicide_num, use = "pairwise.complete.obs") %>%
+  # Save as a data frame
+  as.data.frame %>%
+  # Convert row names to an explicit variable
+  rownames_to_column %>%
+  # Pivot so that all correlations appear in the same column
+pivot_longer(-1, names_to = "other_var", values_to = "correlation") %>% ggplot(aes(rowname, other_var, fill=correlation)) +
+# Heatmap with geom_tile
+geom_tile() +
+  # Change the scale to make the middle appear neutral
+  scale_fill_gradient2(low="red",mid="white",high="blue") +
+  # Overlay values
+  geom_text(aes(label = round(correlation,2)), color = "black", size = 4) +
+  # Give title and labels
+  labs(title = "Correlation matrix for the dataset of Suicide", x = "variable 1", y = "variable 2")
+
+# A package for building a correlation matrix with univariate and bivariate graphs # install.packages(psych)
+library(psych)
+pairs.panels(suicide_tidy,
+method = "pearson", # correlation coefficient method
+hist.col = "blue", # color of histogram
+smooth = FALSE, density = FALSE, ellipses = FALSE)
+  
+```
+*the pair of distinct is mean of suicides_no and mean of population, which content has the strongest relationship.*
+
+```{r }
+# From the dataset suicide_tidy, only consider country Iceland and Thailand, and the suicides_no, population, and mental_hospitals
+Iceland_Thailand <- suicide_tidy %>%
+  filter(country %in% c("Iceland","Thailand"))%>%
+  select(suicides_no,population,mental_hospitals )
+Iceland_Thailand
+# Calculate distances with R function 
+dist(Iceland_Thailand,method="euclidean")
+
+
+# Clustering with kmeans function for suicides_no and population
+clust_data <- suicide_tidy %>%
+  select(suicides_no,population)
+#install.packages ("cluster")
+library(cluster)
+# Use the function kmeans to find 3 clusters
+kmeans1 <- clust_data %>% kmeans(3)
+kmeans1
+# Available components
+kmeans1$size
+# Save cluster assignment as a column in your dataset
+kmeansclust <- clust_data%>%
+  mutate(cluster=as.factor(kmeans1$cluster))
+# Make a plot of data colored by final cluster assignment
+kmeansclust %>%
+  ggplot(aes(suicides_no,population,color = cluster)) +
+  geom_point()
+
+```
+```{r }
+# Covariance matrix
+suicide_tidy %>%
+  select_if(is.numeric) %>%
+  cov
+# Relationships among variables
+library(psych)
+suicide_num
+pairs.panels(suicide_num[1:4], 
+             smooth = FALSE, density = FALSE, ellipses = FALSE,
+             bg = c("red","yellow","blue")[iris$Species], pch = 21)
+
+```
+
+```{r }
+## PCA
+# Prepare data for PCA and run PCA
+pca <- suicide_num %>%
+  # Scale to 0 mean and unit variance (standardize)
+  scale() %>% 
+  prcomp()
+# Results from PCA
+names(pca)
+# Visualize the result PCA
+pca
+# Visualize the rotated data
+head(pca$x)
+# Add the information about the different groups back into PCA data
+pca_data <- data.frame(pca$x, country = suicide_tidy$country)
+head(pca_data)
+# Plot the data according to the new coordinate system: PC1 and PC2
+ggplot(pca_data, aes(x = PC1, y = PC2, color = country)) + 
+  geom_point()
+
+# Take a look at the rotation matrix
+pca$rotation
+# Save the rotation matrix in a data frame
+rotation_data <- data.frame(
+  pca$rotation, 
+  variable = row.names(pca$rotation))
+
+# Define an arrow style
+arrow_style <- arrow(length = unit(0.05, "inches"), type = "closed")
+
+# Plot the contribution of variables to PCs using geom_segment() for arrows and geom_text() for labels
+ggplot(rotation_data) + 
+  geom_segment(aes(xend = PC1, yend = PC2), x = 0, y = 0, arrow = arrow_style) + 
+  geom_text(aes(x = PC1, y = PC2, label = variable), hjust = 0, size = 3, color = "red") + 
+  xlim(-1., 1.25) + 
+  ylim(-1., 1.) +
+  coord_fixed()
+
+```
+*Dimensionality Reduction:
+- I have used PCA on numeric variable. 
+- In the rotation matrix provided in the PCA object, the variable suicides_no and population contribute positive to PC2 but negatively to PC1.
+  The variable health_units and mental_hospitals contribute positive to both PC1 and PC2.
+  
+  
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
