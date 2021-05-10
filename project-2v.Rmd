@@ -1,0 +1,399 @@
+---
+title: 'Project 2: General Analysis Worldwide Suicide rate in 2016'
+author: "Trinh Pham (SDS348)"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Introduction
+- Suicide is a global phenomenon and occurs throughout the lifespan. Effective and evidence-based intervention can implement population. Suicide is a complex issue and therefore suicide prevention efforts need to collaboration among multiple aspects and other sectors such as society, mental business, justice. These efforts must be comprehensive and become broader over worldwide. 
+- Data from this project carried out to investigate the relationship between the suicide number and the population of gender in each country and generatio. After tidying the data, the new dataset called suicide_td has 63 observations. This study will focus on the country, sex,generation, suicide_no, population and mental_hospitals to predict the number of suicides based on population. The results can help the government determine the reason and factors that make change the suicide rate in the world, then they can find the resolution. 
+```{r }
+#imported the dataset
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(readxl)
+suicide <- read_excel("~/Desktop/suicide_rate.xlsx")
+Facilities_new <- read_excel("~/Desktop/Facilities_new.xlsx")
+
+#tidy data set
+suicide_td<- suicide %>% ## join/merge 2 dataset
+   left_join(Facilities_new,by="country") %>%
+  select(-'country-year',-'HDI_for_year',-'outpatient_facilities',-'residential_facilities' ,-'day_treatment',-'gdp_for_year($)',-'gdp_per_capita($)',-'suicides/100k_pop') %>%
+  filter(year.x=="2016") %>%
+  select(-year.y,-year.x) %>%  
+  arrange(desc(suicides_no)) %>%
+  na.omit()  %>%
+  mutate_if(is.character,as.factor)
+suicide_td
+
+```
+
+# EDA
+```{r EDA }
+
+# Scale the variables
+suicide <- suicide_td %>% 
+  select_if(is.numeric)
+# summary statistic (mean/sd,median/IQR, frequencies/proportions)
+summary (suicide)
+IQR(suicide$suicides_no) # interquartile rang of suicide number
+sd(suicide$suicides_no) # standard deviation of suicide number
+IQR(suicide$mental_hospitals)# interquartile rang of population
+sd(suicide$mental_hospitals) # standard deviation of population
+```
+* In the suicide dataset, the mental hospital is significant lower IQR than suicide number ( IQR suicide_no is 96 and IQR population is 0.167). That mean insufficient supply of psychiatric hospitals to take care of those want to suicide. The minimum suicide number is 0 and the maximun is 1421 per year. 
+The standard deviation of suicide number (sd=213.8) isindicated that the data spreading point tend to close to the mean and the standard deviation of mental hospitals (sd=0.283) are low so the standard deviation of mental hospital close to the mean. *
+
+
+```{r}
+# Explore univariate and bivariate summaries
+library(psych)
+pairs.panels(suicide_td[-1,], 
+             method = "pearson", # correlation coefficient method
+             hist.col = "blue", # color of histogram 
+             smooth = FALSE, density = FALSE, ellipses = FALSE)
+
+# Find the correlations among the 10 disciplines
+cor(suicide, use = "pairwise.complete.obs") %>%
+  # Save as a data frame
+  as.data.frame %>%
+  # Convert row names to an explicit variable
+  rownames_to_column %>%
+  # Pivot so that all correlations appear in the same column
+  pivot_longer(-1, names_to = "other_var", values_to = "correlation") %>%
+  ggplot(aes(rowname, ordered(other_var, levels = rev(sort(unique(other_var)))), fill=correlation)) +
+  # Heatmap with geom_tile
+  geom_tile() +
+  # Change the scale to make the middle appear neutral
+  scale_fill_gradient2(low="red",mid="white",high="blue") +
+  # Overlay values
+  geom_text(aes(label = round(correlation,2)), color = "black", size = 4) +
+  # Give title and labels
+  labs(title = "Correlation matrix for the dataset suicide", x = "variable 1", y = "variable 2")
+
+# Compare to results obtained with the built-in regression function
+fit <- lm(suicides_no~population ,data=suicide_td)
+summary(fit) # summary statistic (mean/sd,median/IQR, frequencies/proportions)
+# coefficients of the model
+exp(coef(fit))
+```
+*The correlation between mean of population and suicide number are the strongest relation to each others.*
+
+# Visualization
+```{r}
+library(ggplot2) 
+suicide_td<-as.data.frame(suicide_td)
+# Display the distribution of country and sex of number of suicide. 
+ggplot(suicide_td, aes(x=country,fill=sex))+
+   geom_bar(aes(y = suicides_no), stat="summary", fun="mean")
+
+## Considering age values as categories to display the distribution of number of suicide for age.
+ggplot(suicide_td, aes(x=suicides_no, y=mental_hospitals,color=country))+
+  geom_point() 
+```
+*Thailand is the country have the highest number of suicide rate in 2016. The male have suicide rate is extremely higher than female.The lowest is Grenada, which is have 0 number of suicide in 2016.*
+*According the geom_point plot, Grenada have the highest number of mental_hospitals in their country and Thailands have the lowest. Therefore, the mental hospitals rate is inversely proportional to the suicides number. *
+# MANOVA
+
+```{r }
+## MANOVA
+# How do the means of suicides_no, population, mental_hospitals and health_units differ between sex?
+suicide_td %>%
+  group_by(sex) %>%
+  summarize(mean(suicides_no),mean(population),mean(mental_hospitals),mean(health_units))
+
+# Represent the means per ssex
+suicide_td %>%
+  select(sex,suicides_no,population,mental_hospitals,health_units) %>%
+  pivot_longer(-1,names_to='DV', values_to='measure') %>%
+  ggplot(aes(sex,measure,fill=sex)) +
+  geom_bar(stat="summary", fun = "mean") +
+  geom_errorbar(stat="summary", fun.data = "mean_se", width=-5) +
+  facet_wrap(~DV, nrow=2) +
+  coord_flip() + 
+  ylab("") + 
+  theme(legend.position = "none")
+# Perform MANOVA with 4 response variables listed in cbind()
+manova_suicide <- manova(cbind(suicides_no,population,mental_hospitals,health_units) ~ sex, data = suicide_td)
+
+# Output of MANOVA
+summary(manova_suicide)
+```
+*The p-value of one way MANOVA is statistically significant at the 0.2157 significant level(p=0.001), then we can perform one-way ANOVA for each variable.*
+```{r ANOVA}
+  # If MANOVA is significant then we can perform one-way ANOVA for each variable
+  summary.aov(manova_suicide)
+# If ANOVA is significant then we can perform post-hoc analysis
+    # For suicides_no
+    pairwise.t.test(suicide_td$suicides_no, suicide_td$sex, p.adj="none")
+    # For population size
+    pairwise.t.test(suicide_td$population,suicide_td$sex, p.adj="none")
+
+```
+*The p value of suicide number is less than the significant level (p-value = 0.007), thus the statistically significant association between suicide number and sex.*
+*The p value of population is greater than the significant level (p-value = 0.945), thus the association is not statistically significant between population and sex.*
+*The p value of both health units and mental hospitals are greater than significant level( p-value =1), thus the association is not statistically significant between either health units or mental hospitals and sex.*
+*Based on the Post hoc analysis was performed conducting pairwise comparison to determine which sex different in suicide number and population. the mean different are 0.07 between suicide number and sex. Besides, the mean different are 0.94 between population and sex.*
+
+## Randomization test.
+# Null Hypotheses: The suicide number is the same for both male and female
+# ALternative Hypotheses: The suicide number is different for male and female.
+```{r Randomization test }
+# Represent the distribution of suicides number per sex.
+ggplot(suicide_td, aes(suicides_no,fill=sex)) +
+  geom_histogram(bins=6.5) +
+  facet_wrap(~sex,ncol=2) +
+  theme(legend.position="none")
+# Calculate the mean difference between the two conditions
+true_diff <- suicide_td %>%
+  group_by(sex) %>%
+  summarize(means = mean(suicides_no)) %>%
+  summarize(mean_diff = diff(means)) %>%
+  pull
+true_diff
+
+## Repeat randomization many times 
+# Create an empty vector to store the mean differences 
+mean_diff <- vector()
+
+# Create many randomizations with a for loop
+for(i in 1:5000){ 
+  temp <- data.frame(sex = suicide_td$sex, suicides_no = sample(suicide_td$suicides_no)) 
+  
+  mean_diff[i] <- temp %>% 
+    group_by(sex) %>%
+    summarize(means = mean(suicides_no)) %>%
+    summarize(mean_diff = diff(means)) %>%
+    pull
+}
+# Represent the distribution of the mean differences with a vertical line showing the true difference
+{hist(mean_diff, main="Distribution of the mean differences"); abline(v = 127.15, col="red")}
+
+# Calculate the corresponding two-sided p-value
+mean(mean_diff > -true_diff | mean_diff < true_diff)
+# Compare to a Welch's t-test
+t.test(data = suicide_td, suicides_no ~ sex)
+```
+*The suicide numbers are significant different between male and female (t=-2.770, df=43.904, p=0.008<0.05).*
+
+
+## Linear regression model. 
+
+```{r Linear regression model }
+# Create a binary variable coded as 0 and 1
+suicide_td <- suicide_td %>%
+  mutate(y = ifelse(sex == "male", 1, 0))
+suicide_td
+# Fit a regression model with one binary variable and a continuous variable as predictors
+fit <- lm(suicides_no ~ sex +  population, data = suicide_td)
+summary(fit)
+summary(fit)$r.squared
+# Visualize the relationships between the two variables
+# Represent the relationship
+ggplot(suicide_td, aes(suicides_no,y)) +
+  geom_jitter(width=.3,height=0) +
+  geom_smooth(method='lm', se = FALSE)
+```
+
+*The coefficient of determination of the simple linear regression model for the dataset of suicide_td is 0.6603982*
+
+```{r }
+# Include an interaction term in the regression model
+fit1 <- lm(suicides_no ~ sex *  population, data = suicide_td)
+summary(fit1)
+# Center the data around the means (the intercept becomes more informative)
+suicide_td$population_c <- suicide_td$population - mean(suicide_td$population)
+
+# Include an interaction term in the regression model with centered predictors
+fit_c <- lm(suicides_no ~ sex *  population_c, data = suicide_td)
+summary(fit_c)
+# Let's visualize the relationships
+ggplot(suicide_td, aes(x =population_c, y = suicides_no, color = sex)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE, fullrange=TRUE)
+```
+*The coefficient of determination of the simple linear regression model for interaction term in the regression model with centered predictors are 0.8871.*
+*Population is significantly associated with the number of suicide in between female and male, for every one unit increase in population, the number of suicide goes up by 3.144e-05 people ( t= 4.786, df=60, p<0.001)*
+*There is also significant interaction between population and sex category. The slope for male population on the number of suicide is 9.920e-05 higher than for female group (t=10.523, df=60, p<0.001).*
+```{r Check assumption}
+# Check assumptions
+# Linearity and homoscedasticity
+plot(fit1, which = 1)
+## Normality
+plot(fit1, which = 2)
+# Shapiro-Wilk test
+# H0: normality
+shapiro.test(fit1$residuals)
+
+## Equal variance (homoscedasticity)
+library(sandwich);
+# Install a new package
+# install.packages("lmtest")
+library(lmtest)
+# Breusch-Pagan test
+# H0: homoscedasticity of fit interaction
+bptest(fit1) 
+
+```
+*The interaction of sex and population on suicide number is not normally ( p=4.17e-07< 0.05) by # Shapiro-Wilk test.*
+*The assumption of homoscedasticity is approxiated not met the requirement on this data, ( p= 0.01962< 0.05).*
+
+```{r Data transformation}
+# Log of response as well
+suicide_td<- suicide_td %>%
+  mutate(lnpop=log(population))
+  
+
+# Visualize relationship
+ggplot(suicide_td, aes(x = lnpop, y = suicides_no)) +
+  geom_point() +
+  geom_smooth(method = lm, se = FALSE) +
+  labs(title ="Regression line between ln(population) andsuicides_no",             
+       x = "ln(population)", y = "ln(suicides_no)")
+# Fit a regression model
+fit2 <- lm(suicides_no~lnpop, suicide_td)
+summary(fit2)
+# Diagnostic assumptions
+plot(fit2, which = 1)
+plot(fit2, which = 2)
+shapiro.test(fit2$residuals)
+# Breusch-Pagan test for homoscedasticity
+bptest(fit2)
+
+## Robust Standard Errors
+# Uncorrected Standard Errors
+summary(fit2)$coef
+# Robust Standard Errors
+coeftest(fit2, vcov = vcovHC(fit2))
+
+```
+
+*After the data transformation, the assumption are not violated( homoscedasticity, normality). The data still remain the outliner Regardless of meeting the assumptions. Recompute regression results with robust standard errors.*
+  
+```{r}
+#  Bootstrap from observations
+# Repeat bootstrapping 5000 times, saving the coefficients each time
+samp_SEs <- replicate(5000, {
+  # Bootstrap your data (resample observations)
+  boot_data <- sample_frac(suicide_td, replace = TRUE)
+  # Fit regression model
+  fitboot <- lm(suicides_no ~ sex * lnpop, data = boot_data)
+  # Save the coefficients
+  coef(fitboot)
+})
+
+# Estimated SEs
+samp_SEs %>%
+  # Transpose the obtained matrices
+  t %>%
+  # Consider the matrix as a data frame
+  as.data.frame %>%
+  # Compute the standard error (standard deviation of the sampling distribution)
+  summarize_all(sd)
+
+# Compare with normal-theory SEs
+coeftest(fit2)
+
+# Compare with robust SEs
+coeftest(fit2, vcov = vcovHC(fit2))
+
+```
+*The proportion of original SES have changed into robust SEs but that is not effect the significant different between the population and sex relate to suicide number.*
+
+## Logistic Regression
+
+```{r Logistic Regression Model}
+# Fit a linear regression model
+fit_l <- glm(y ~ suicides_no + population, data = suicide_td, family="binomial")
+summary(fit_l)
+## Interpret coefficinets
+exp(coef(fit_l))
+
+```
+*Everyone one-unit increase in suicides_no increase the log odd of magnificnet by 0.0495. Everyone one-unit increase in population increase the log odd of magnificnet by -2.955e-06.*
+*Every one-unit increase in suicides_no multiplies the odd of malignancy by 1.0507.Every one-unit increase in population multiplies the odd of malignancy by 0.999997*
+```{r }
+#Compute and discuss the Accuracy, Sensitivity (TPR), Specificity (TNR), and Recall (PPV).
+# Add predicted probabilities to the dataset
+suicide_td$prob <- predict(fit_l, type = "response")
+
+# Predicted outcome is based on the probability of male
+# if the probability is greater than 0.5, the clump is found to be male
+suicide_td$predicted <- ifelse(suicide_td$prob >0.5, "male", "female") 
+
+# Plot the model
+ggplot(suicide_td, aes(suicides_no,y)) +
+  geom_jitter(aes(color = predicted), width = .3, height = 0) +
+  stat_smooth(method="glm", method.args = list(family="binomial"), se = FALSE) +
+  geom_hline(yintercept = 0.5, lty =2) +
+  ylab("Pr(malignancy)")
+# Save the predicted log-odds in the dataset
+suicide_td$logit <- predict(fit_l)
+
+# Confusion matrix
+table(truth = suicide_td$sex, prediction = suicide_td$predicted) %>%
+  addmargins
+# Accuracy (correctly classified cases)
+(21+28)/63
+# Sensitivity (True Positive Rate, TPR)
+28/34
+# Specificity (True Negative Rate, TNR)
+21/29
+# Precision (Positive Predictive Value, PPV)
+28/36
+
+# Predicted log odds 
+suicide_td$logit <- predict(fit_l, type = "link") 
+
+# Density plot of log-odds for each outcome
+suicide_td %>%
+  ggplot() + 
+  geom_density(aes(logit, color = sex, fill = sex), alpha = .4) +
+    geom_rug(aes(logit, color = sex)) +
+  geom_vline(xintercept = 0) + 
+  xlab("logit (log-odds)")
+```
+*The accuracy of the confusion matrix between the truth and prediction of sex in suicide_td data is 0.778. The sensitivy is 0.824. The Specificity is 0.724. The precision is 0.778. Lastly, those data call out the fact that there was appropriate fitting from the data.*
+```{r ROC curve }
+
+# Define functions to calculate sensitivity and specificity for different cutoffs
+sens <- function(p, data = data, y = y) mean(data[data$y == 1, ]$prob > p)
+spec <- function(p, data = data, y = y) mean(data[data$y == 0, ]$prob <= p)
+
+# Apply the functions to our data
+sensitivity <- sapply(seq(0,1,.01),sens,suicide_td)
+specificity<-sapply(seq(0,1,.01),spec,suicide_td)
+
+# Store values of sensitivity and specificity in a dataframe with cutoff values
+ROC <- data.frame(sensitivity, specificity, cutoff = seq(0,1,.01))
+
+# Represent the relationship between sensitivity and specificity for different cutoffs
+ROC %>%
+  pivot_longer(-cutoff, names_to = "key", values_to = "rate") %>%
+  ggplot(aes(cutoff, rate, color = key)) + 
+  geom_path() +
+  geom_vline(xintercept = c(.1,.5,.9), lty = 2, color = "gray50")
+
+# Call the library plotROC
+library(plotROC) 
+
+# Plot ROC depending on values of y and its probabilities displaying some cutoff values
+ROCplot1 <- ggplot(suicide_td) + 
+  geom_roc(aes(d = y, m = prob), cutoffs.at = list(0.1, 0.5, 0.9))
+ROCplot1
+```
+*Instead of coding “by hand” how to represent TPR as a function of FPR, let’s use a package to build ROC curves.*
+
+```{r AUC}
+# Calculate the area under the curve still using the library plotROC with function calc_auc
+calc_auc(ROCplot1)
+```
+*The AUC, which measures how true positive rate( recall) and false positive rate trade off came out to be 0.838125, it is about 83,8%. Therefore, the AUC has a moderate classification accuracy judging from our rule of thumb.*
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
